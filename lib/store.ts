@@ -4,9 +4,16 @@ import Redis from 'ioredis'
 // Singleton for Redis connection to prevent creating new connections on HMR reloads
 const redisUrl = process.env.REDIS_URL
 const globalForRedis = globalThis as unknown as { redis?: Redis }
-const redis = globalForRedis.redis ?? (redisUrl ? new Redis(redisUrl) : undefined)
-if (process.env.NODE_ENV !== 'production' && redis) {
-  globalForRedis.redis = redis
+let redis: Redis | undefined = globalForRedis.redis
+
+if (!redis && redisUrl) {
+  redis = new Redis(redisUrl)
+  redis.on('error', (err) => {
+    console.error('[ioredis] Store client connection error:', err)
+  })
+  if (process.env.NODE_ENV !== 'production') {
+    globalForRedis.redis = redis
+  }
 }
 
 // Simple store supporting Redis with in-memory fallback

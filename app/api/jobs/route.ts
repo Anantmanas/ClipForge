@@ -67,8 +67,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, data: state }, { status: 201 })
   } catch (err) {
     console.error('POST /api/jobs error:', err)
+    const errMsg = err instanceof Error ? err.message : String(err)
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: `Internal server error: ${errMsg}` },
       { status: 500 }
     )
   }

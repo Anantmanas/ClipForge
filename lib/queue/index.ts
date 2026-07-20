@@ -13,9 +13,13 @@ const globalForQueue = globalThis as unknown as {
 export function getRedisConnection(): Redis | undefined {
   if (!redisUrl) return undefined
   if (!globalForQueue.queueConnection) {
-    globalForQueue.queueConnection = new Redis(redisUrl, {
+    const conn = new Redis(redisUrl, {
       maxRetriesPerRequest: null, // Required by BullMQ
     })
+    conn.on('error', (err) => {
+      console.error('[ioredis] Queue Redis connection error:', err)
+    })
+    globalForQueue.queueConnection = conn
   }
   return globalForQueue.queueConnection
 }
@@ -24,7 +28,11 @@ export function getVideoQueue(): Queue | undefined {
   const connection = getRedisConnection()
   if (!connection) return undefined
   if (!globalForQueue.videoQueue) {
-    globalForQueue.videoQueue = new Queue('video-jobs', { connection })
+    const q = new Queue('video-jobs', { connection })
+    q.on('error', (err) => {
+      console.error('[BullMQ] Queue error:', err)
+    })
+    globalForQueue.videoQueue = q
   }
   return globalForQueue.videoQueue
 }
@@ -33,7 +41,7 @@ export function initWorker(): Worker | undefined {
   const connection = getRedisConnection()
   if (!connection) return undefined
   if (!globalForQueue.videoWorker) {
-    globalForQueue.videoWorker = new Worker(
+    const w = new Worker(
       'video-jobs',
       async (job) => {
         const { id, options } = job.data
@@ -47,7 +55,11 @@ export function initWorker(): Worker | undefined {
       },
       { connection, concurrency: 1 }
     )
+    w.on('error', (err) => {
+      console.error('[BullMQ] Worker error:', err)
+    })
     console.log('[Worker] BullMQ worker initialized.')
+    globalForQueue.videoWorker = w
   }
   return globalForQueue.videoWorker
 }
