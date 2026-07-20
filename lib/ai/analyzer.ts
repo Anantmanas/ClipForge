@@ -90,6 +90,7 @@ function adjustClipRange(
 
   const getDuration = (s: number, e: number) => segments[e].end - segments[s].start
 
+  // Case 1: Too short -> expand symmetrically
   while (getDuration(start, end) < targetDuration) {
     const canExpandLeft = start > 0
     const canExpandRight = end < segments.length - 1
@@ -106,6 +107,18 @@ function adjustClipRange(
       start--
     } else {
       end++
+    }
+  }
+
+  // Case 2: Too long -> shrink symmetrically
+  while (getDuration(start, end) > targetDuration + 2 && start < end) {
+    const durationWithStartShrunk = segments[end].end - segments[start + 1].start
+    const durationWithEndShrunk = segments[end - 1].end - segments[start].start
+
+    if (Math.abs(durationWithStartShrunk - targetDuration) < Math.abs(durationWithEndShrunk - targetDuration)) {
+      start++
+    } else {
+      end--
     }
   }
 

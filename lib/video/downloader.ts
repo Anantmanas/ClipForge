@@ -64,7 +64,7 @@ export async function downloadVideo(
   // Download best quality mp4 up to 1080p
   await execFileAsync(ytdlp, [
     '-f',
-    'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+    'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
     '--merge-output-format',
     'mp4',
     '-o',
