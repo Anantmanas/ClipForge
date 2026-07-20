@@ -19,8 +19,8 @@ function outputDir(): string {
   return d
 }
 
-function progress(jobId: string, status: JobState['status'], pct: number, msg: string) {
-  jobStore.update(jobId, { status, progress: pct, message: msg })
+async function progress(jobId: string, status: JobState['status'], pct: number, msg: string) {
+  await jobStore.update(jobId, { status, progress: pct, message: msg })
   console.log(`[${jobId}] [${status}] ${pct}% — ${msg}`)
 }
 
@@ -30,34 +30,34 @@ export async function runPipeline(jobId: string, options: JobOptions): Promise<v
 
   try {
     // 1. Download
-    progress(jobId, 'downloading', 5, 'Downloading video…')
+    await progress(jobId, 'downloading', 5, 'Downloading video…')
     const downloaded = await downloadVideo(options.url, tmp, jobId)
-    jobStore.update(jobId, {
+    await jobStore.update(jobId, {
       videoTitle: downloaded.title,
       videoDuration: downloaded.duration,
     })
 
     // 2. Transcribe
-    progress(jobId, 'transcribing', 25, 'Transcribing audio…')
+    await progress(jobId, 'transcribing', 25, 'Transcribing audio…')
     const segments = await transcribeVideo(downloaded.filePath, tmp)
     if (segments.length === 0) {
       throw new Error('Transcription returned no segments. The video may have no speech.')
     }
 
     // 3. AI Analysis
-    progress(jobId, 'analyzing', 45, 'AI is scoring clips…')
+    await progress(jobId, 'analyzing', 45, 'AI is scoring clips…')
     const candidates = await findViralClips(segments, options.clipDuration, downloaded.title)
     if (candidates.length === 0) {
       throw new Error('AI could not identify any viral clip candidates.')
     }
-    jobStore.update(jobId, { candidates })
+    await jobStore.update(jobId, { candidates })
 
     // 4. Render requested number of clips (options.numClips)
     const numToRender = Math.min(options.numClips ?? 1, candidates.length)
 
     for (let i = 0; i < numToRender; i++) {
       const clip = candidates[i]
-      progress(jobId, 'rendering', 60 + Math.round((i / numToRender) * 35), `Rendering clip ${i + 1} of ${numToRender}…`)
+      await progress(jobId, 'rendering', 60 + Math.round((i / numToRender) * 35), `Rendering clip ${i + 1} of ${numToRender}…`)
 
       const captions = options.addCaptions
         ? await generateCaptions(segments, clip.startTime, clip.endTime)
@@ -81,8 +81,8 @@ export async function runPipeline(jobId: string, options: JobOptions): Promise<v
     }
 
     const best = candidates[0]
-    progress(jobId, 'done', 100, 'Clips ready!')
-    jobStore.update(jobId, {
+    await progress(jobId, 'done', 100, 'Clips ready!')
+    await jobStore.update(jobId, {
       selectedClip: best,
       candidates, // Save updated candidates with outputUrls
       outputPath: best.outputPath,
@@ -92,7 +92,7 @@ export async function runPipeline(jobId: string, options: JobOptions): Promise<v
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[${jobId}] Pipeline error:`, message)
-    jobStore.update(jobId, {
+    await jobStore.update(jobId, {
       status: 'error',
       progress: 0,
       message: 'An error occurred',

@@ -1,34 +1,67 @@
 import { JobState } from '@/types'
+import Redis from 'ioredis'
 
-// Simple in-memory store with TTL
+// Singleton for Redis connection to prevent creating new connections on HMR reloads
+const redisUrl = process.env.REDIS_URL
+const globalForRedis = globalThis as unknown as { redis?: Redis }
+const redis = globalForRedis.redis ?? (redisUrl ? new Redis(redisUrl) : undefined)
+if (process.env.NODE_ENV !== 'production' && redis) {
+  globalForRedis.redis = redis
+}
+
+// Simple store supporting Redis with in-memory fallback
 class JobStore {
   private jobs = new Map<string, JobState>()
   private readonly TTL = 1000 * 60 * 60 * 2 // 2 hours
 
-  set(id: string, state: JobState): void {
-    this.jobs.set(id, state)
-    // Auto-cleanup
-    setTimeout(() => this.jobs.delete(id), this.TTL)
+  private get redis(): Redis | undefined {
+    return redis
   }
 
-  get(id: string): JobState | undefined {
-    return this.jobs.get(id)
+  async set(id: string, state: JobState): Promise<void> {
+    if (this.redis) {
+      await this.redis.setex(`job:${id}`, Math.ceil(this.TTL / 1000), JSON.stringify(state))
+    } else {
+      this.jobs.set(id, state)
+      // Auto-cleanup
+      setTimeout(() => this.jobs.delete(id), this.TTL)
+    }
   }
 
-  update(id: string, patch: Partial<JobState>): JobState | null {
-    const existing = this.jobs.get(id)
+  async get(id: string): Promise<JobState | undefined> {
+    if (this.redis) {
+      const data = await this.redis.get(`job:${id}`)
+      return data ? JSON.parse(data) : undefined
+    } else {
+      return this.jobs.get(id)
+    }
+  }
+
+  async update(id: string, patch: Partial<JobState>): Promise<JobState | null> {
+    const existing = await this.get(id)
     if (!existing) return null
     const updated: JobState = { ...existing, ...patch, updatedAt: Date.now() }
-    this.jobs.set(id, updated)
+    await this.set(id, updated)
     return updated
   }
 
-  delete(id: string): void {
-    this.jobs.delete(id)
+  async delete(id: string): Promise<void> {
+    if (this.redis) {
+      await this.redis.del(`job:${id}`)
+    } else {
+      this.jobs.delete(id)
+    }
   }
 
-  all(): JobState[] {
-    return Array.from(this.jobs.values())
+  async all(): Promise<JobState[]> {
+    if (this.redis) {
+      const keys = await this.redis.keys('job:*')
+      if (keys.length === 0) return []
+      const list = await this.redis.mget(...keys)
+      return list.map(item => (item ? JSON.parse(item) : null)).filter(Boolean) as JobState[]
+    } else {
+      return Array.from(this.jobs.values())
+    }
   }
 }
 
@@ -36,3 +69,4 @@ class JobStore {
 const globalForStore = globalThis as unknown as { jobStore: JobStore }
 export const jobStore = globalForStore.jobStore ?? new JobStore()
 if (process.env.NODE_ENV !== 'production') globalForStore.jobStore = jobStore
+

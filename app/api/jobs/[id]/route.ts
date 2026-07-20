@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const job = jobStore.get(id)
+  const job = await jobStore.get(id)
 
   if (!job) {
     return NextResponse.json(

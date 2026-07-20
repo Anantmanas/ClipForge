@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { jobStore } from '@/lib/store'
+import { getVideoQueue, initWorker } from '@/lib/queue'
 import { runPipeline } from '@/lib/pipeline'
 import { isValidYouTubeUrl } from '@/lib/utils'
 import { JobState } from '@/types'
@@ -50,11 +51,18 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     }
 
-    jobStore.set(id, state)
+    await jobStore.set(id, state)
 
-    // Run pipeline asynchronously (inline worker mode)
-    // In production with Redis, this would dispatch to a BullMQ queue
-    setImmediate(() => runPipeline(id, options))
+    const videoQueue = getVideoQueue()
+    if (videoQueue) {
+      await videoQueue.add('process', { id, options })
+      if (process.env.INLINE_WORKER === 'true') {
+        initWorker()
+      }
+    } else {
+      // Run pipeline asynchronously (inline worker mode)
+      setImmediate(() => runPipeline(id, options))
+    }
 
     return NextResponse.json({ success: true, data: state }, { status: 201 })
   } catch (err) {
