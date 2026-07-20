@@ -7,13 +7,15 @@ const globalForRedis = globalThis as unknown as { redis?: Redis }
 let redis: Redis | undefined = globalForRedis.redis
 
 if (!redis && redisUrl) {
-  redis = new Redis(redisUrl)
+  redis = new Redis(redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  })
   redis.on('error', (err) => {
     console.error('[ioredis] Store client connection error:', err)
   })
-  if (process.env.NODE_ENV !== 'production') {
-    globalForRedis.redis = redis
-  }
+  // Cache the Redis singleton globally in all environments
+  globalForRedis.redis = redis
 }
 
 // Simple store supporting Redis with in-memory fallback
@@ -27,7 +29,14 @@ class JobStore {
 
   async set(id: string, state: JobState): Promise<void> {
     if (this.redis) {
-      await this.redis.setex(`job:${id}`, Math.ceil(this.TTL / 1000), JSON.stringify(state))
+      try {
+        await this.redis.setex(`job:${id}`, Math.ceil(this.TTL / 1000), JSON.stringify(state))
+      } catch (err) {
+        console.error('[store] Redis set failed, using memory fallback:', err)
+        this.jobs.set(id, state)
+        // Auto-cleanup
+        setTimeout(() => this.jobs.delete(id), this.TTL)
+      }
     } else {
       this.jobs.set(id, state)
       // Auto-cleanup
@@ -37,8 +46,13 @@ class JobStore {
 
   async get(id: string): Promise<JobState | undefined> {
     if (this.redis) {
-      const data = await this.redis.get(`job:${id}`)
-      return data ? JSON.parse(data) : undefined
+      try {
+        const data = await this.redis.get(`job:${id}`)
+        return data ? JSON.parse(data) : undefined
+      } catch (err) {
+        console.error('[store] Redis get failed, using memory fallback:', err)
+        return this.jobs.get(id)
+      }
     } else {
       return this.jobs.get(id)
     }
