@@ -21,29 +21,37 @@ async function extractAudio(videoPath: string, audioPath: string): Promise<void>
 }
 
 async function transcribeWithOpenAI(audioPath: string): Promise<TranscriptSegment[]> {
-  let apiKey = process.env.OPENAI_API_KEY
+  let apiKey: string | undefined
   let baseURL = 'https://api.openai.com/v1'
   let model = process.env.AI_AUDIO_MODEL ?? 'whisper-1'
 
-  if (apiKey) {
-    // defaults are fine
-  } else if (process.env.GROQ_API_KEY) {
+  // Prefer Groq for Whisper audio transcription (free, fast, and avoids sending Gemini keys to api.openai.com)
+  if (process.env.GROQ_API_KEY) {
     apiKey = process.env.GROQ_API_KEY
     baseURL = 'https://api.groq.com/openai/v1'
     model = process.env.AI_AUDIO_MODEL ?? 'whisper-large-v3'
+  } else if (process.env.OPENAI_API_KEY) {
+    apiKey = process.env.OPENAI_API_KEY
+    baseURL = 'https://api.openai.com/v1'
+    model = process.env.AI_AUDIO_MODEL ?? 'whisper-1'
   } else {
-    throw new Error('No compatible audio API key found. Set OPENAI_API_KEY or GROQ_API_KEY in .env (OpenRouter does not support audio transcription)')
+    throw new Error('No compatible audio API key found. Set GROQ_API_KEY or OPENAI_API_KEY in .env (OpenRouter does not support audio transcription)')
   }
 
   const client = new OpenAI({ apiKey, baseURL })
 
   const audioStream = fs.createReadStream(audioPath)
-  const response = await client.audio.transcriptions.create({
-    model,
-    file: audioStream,
-    response_format: 'verbose_json',
-    timestamp_granularities: ['segment'],
-  })
+  let response: any
+  try {
+    response = await client.audio.transcriptions.create({
+      model,
+      file: audioStream,
+      response_format: 'verbose_json',
+      timestamp_granularities: ['segment'],
+    })
+  } catch (err) {
+    throw new Error(`Audio transcription failed (${model}): ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // verbose_json returns segments
   const typed = response as unknown as {

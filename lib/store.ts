@@ -10,8 +10,15 @@ if (!redis && redisUrl) {
   redis = new Redis(redisUrl, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
+    keepAlive: 30000,
+    reconnectOnError: (err) => {
+      const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT']
+      return targetErrors.some((e) => err.message.includes(e))
+    },
   })
-  redis.on('error', (err) => {
+  redis.on('error', (err: any) => {
+    // Upstash closes idle TCP sockets; ioredis reconnects automatically
+    if (err?.code === 'ECONNRESET') return
     console.error('[ioredis] Store client connection error:', err)
   })
   // Cache the Redis singleton globally in all environments

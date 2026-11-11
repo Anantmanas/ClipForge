@@ -2,17 +2,22 @@ import OpenAI from 'openai'
 import { ClipCandidate, ClipScore, TranscriptSegment } from '@/types'
 
 function getClient(): OpenAI {
-  let apiKey = process.env.OPENAI_API_KEY
+  let apiKey = process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY
   let baseURL = process.env.AI_BASE_URL
 
   if (baseURL?.includes('openrouter')) {
     apiKey = process.env.OPENROUTER_API_KEY ?? apiKey
   } else if (baseURL?.includes('groq')) {
     apiKey = process.env.GROQ_API_KEY ?? apiKey
+  } else if (baseURL?.includes('googleapis')) {
+    apiKey = process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? apiKey
   }
 
   if (!apiKey) {
-    if (process.env.OPENROUTER_API_KEY) {
+    if (process.env.GEMINI_API_KEY) {
+      apiKey = process.env.GEMINI_API_KEY
+      baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    } else if (process.env.OPENROUTER_API_KEY) {
       apiKey = process.env.OPENROUTER_API_KEY
       baseURL = 'https://openrouter.ai/api/v1'
     } else if (process.env.GROQ_API_KEY) {
@@ -21,7 +26,7 @@ function getClient(): OpenAI {
     }
   }
 
-  if (!apiKey) throw new Error('No AI API key found. Set OPENAI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY in .env')
+  if (!apiKey) throw new Error('No AI API key found. Set GEMINI_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY in .env')
   return new OpenAI({
     apiKey,
     baseURL: baseURL ?? 'https://api.openai.com/v1',
@@ -181,20 +186,37 @@ Find the best viral clip moments.`
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 1500,
+      max_tokens: 2000,
     })
     raw = response.choices[0].message.content ?? ''
   } catch (err) {
     throw new Error(`AI analysis failed: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // Parse JSON, stripping any markdown fences
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  // Parse JSON, stripping any markdown fences and any leading/trailing prose.
+  // Models sometimes wrap output in ```json ... ```, sometimes in ``` ... ```,
+  // and occasionally add a sentence before/after the JSON.
+  let cleaned = raw
+    .replace(/^[\s\S]*?```(?:json)?\s*/i, '')   // drop everything up to & including first fence
+    .replace(/```[\s\S]*$/g, '')                  // drop closing fence & anything after
+    .trim()
+  // If the model returned prose + JSON, try to extract the first {...} block
+  if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+    const firstBrace = cleaned.indexOf('{')
+    const lastBrace = cleaned.lastIndexOf('}')
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.slice(firstBrace, lastBrace + 1)
+    }
+  }
+
   let parsed: AnalysisResult
   try {
     parsed = JSON.parse(cleaned)
-  } catch {
-    throw new Error(`Failed to parse AI response as JSON: ${raw.slice(0, 200)}`)
+  } catch (err) {
+    throw new Error(
+      `Failed to parse AI response as JSON (${err instanceof Error ? err.message : String(err)}). ` +
+      `Raw response (first 500 chars): ${raw.slice(0, 500)}`
+    )
   }
 
   const candidates: ClipCandidate[] = []

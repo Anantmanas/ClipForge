@@ -63,9 +63,21 @@ function buildCropFilter(
 }
 
 function buildScaleFilter(quality: Quality, aspectRatio: AspectRatio): string {
-  const height = quality === '1080p' ? 1080 : 720
   const [w, h] = aspectRatio.split(':').map(Number)
-  const width = Math.round((height * w) / h)
+  // Pick the long edge based on aspect orientation: portrait uses height as long edge, landscape uses width.
+  const longEdge = quality === '1080p' ? 1920 : 1280
+  const targetAspect = w / h
+  let width: number
+  let height: number
+  if (targetAspect >= 1) {
+    // Landscape or square: long edge is width
+    width = longEdge
+    height = Math.round(longEdge / targetAspect)
+  } else {
+    // Portrait: long edge is height
+    height = longEdge
+    width = Math.round(longEdge * targetAspect)
+  }
   // Ensure dimensions are divisible by 2 (H.264 requirement)
   const safeW = width % 2 === 0 ? width : width + 1
   const safeH = height % 2 === 0 ? height : height + 1
@@ -126,8 +138,10 @@ export async function renderClip(params: {
 
     if (relativeCaptions.length > 0) {
       const [targetW, targetH] = aspectRatio.split(':').map(Number)
-      const outputHeight = quality === '1080p' ? 1080 : 720
-      const outputWidth = Math.round((outputHeight * targetW) / targetH)
+      const longEdge = quality === '1080p' ? 1920 : 1280
+      const targetAspect = targetW / targetH
+      const outputHeight = targetAspect >= 1 ? Math.round(longEdge / targetAspect) : longEdge
+      const outputWidth = targetAspect >= 1 ? longEdge : Math.round(longEdge * targetAspect)
       filterParts.push(buildCaptionFilter(relativeCaptions, outputHeight))
       void outputWidth // used implicitly
     }
@@ -143,7 +157,7 @@ export async function renderClip(params: {
     '-t', String(duration),
     '-vf', vf,
     '-c:v', 'libx264',
-    '-preset', 'fast',
+    '-preset', quality === '1080p' ? 'medium' : 'fast',
     '-crf', quality === '1080p' ? '18' : '20',
     '-c:a', 'aac',
     '-b:a', '128k',

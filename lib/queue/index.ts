@@ -6,22 +6,43 @@ const redisUrl = process.env.REDIS_URL
 
 const globalForQueue = globalThis as unknown as {
   queueConnection?: Redis
+  workerConnection?: Redis
   videoQueue?: Queue
   videoWorker?: Worker
+}
+
+function createRedisConnection(label: string): Redis {
+  const conn = new Redis(redisUrl!, {
+    maxRetriesPerRequest: null, // Required by BullMQ
+    enableReadyCheck: false,
+    keepAlive: 30000,
+    reconnectOnError: (err) => {
+      const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT']
+      return targetErrors.some((e) => err.message.includes(e))
+    },
+  })
+  conn.on('error', (err: any) => {
+    // Upstash closes idle TCP sockets; ioredis reconnects automatically
+    if (err?.code === 'ECONNRESET') return
+    console.error(`[ioredis] ${label} Redis connection error:`, err)
+  })
+  return conn
 }
 
 export function getRedisConnection(): Redis | undefined {
   if (!redisUrl) return undefined
   if (!globalForQueue.queueConnection) {
-    const conn = new Redis(redisUrl, {
-      maxRetriesPerRequest: null, // Required by BullMQ
-    })
-    conn.on('error', (err) => {
-      console.error('[ioredis] Queue Redis connection error:', err)
-    })
-    globalForQueue.queueConnection = conn
+    globalForQueue.queueConnection = createRedisConnection('Queue')
   }
   return globalForQueue.queueConnection
+}
+
+function getWorkerConnection(): Redis | undefined {
+  if (!redisUrl) return undefined
+  if (!globalForQueue.workerConnection) {
+    globalForQueue.workerConnection = createRedisConnection('Worker')
+  }
+  return globalForQueue.workerConnection
 }
 
 export function getVideoQueue(): Queue | undefined {
@@ -38,7 +59,7 @@ export function getVideoQueue(): Queue | undefined {
 }
 
 export function initWorker(): Worker | undefined {
-  const connection = getRedisConnection()
+  const connection = getWorkerConnection()
   if (!connection) return undefined
   if (!globalForQueue.videoWorker) {
     const w = new Worker(

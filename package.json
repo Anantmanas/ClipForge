@@ -14,6 +14,7 @@
     "@radix-ui/react-select": "^2.3.3",
     "@radix-ui/react-slider": "^1.4.3",
     "@radix-ui/react-toast": "^1.2.19",
+    "@upstash/redis": "^1.38.0",
     "bullmq": "^5.80.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
